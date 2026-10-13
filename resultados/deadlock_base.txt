@@ -1,0 +1,4 @@
+base pensar=2ms pausa=1ms: Resumo (30 repeticoes): base=14 deadlock(s)
+base pensar=0 pausa=1ms: Resumo (30 repeticoes): base=30 deadlock(s)
+base pensar=2ms pausa=0: Resumo (30 repeticoes): base=0 deadlock(s)
+base pensar=0 pausa=0: Resumo (30 repeticoes): base=0 deadlock(s)
