@@ -6,9 +6,8 @@ import (
 	"time"
 )
 
-// executarComPrazo falha o teste em vez de travar até o timeout de 10 min
-// do go test. Um consumidor preso (permissão perdida, pílula faltando)
-// aparece aqui como "travou".
+// executarComPrazo falha o teste em vez de travar até o timeout do go test.
+// Consumidor preso (permissão perdida, pílula faltando) aparece como "travou".
 func executarComPrazo(t *testing.T, v string, cfg Config) Resultado {
 	t.Helper()
 	ch := make(chan Resultado, 1)
@@ -39,11 +38,8 @@ func TestSemContencao(t *testing.T) {
 	}
 }
 
-// Timeout de 1 microssegundo: o consumidor 0 estoura o prazo o tempo todo
-// enquanto itens continuam chegando. É o cenário em que um V() pode
-// escolher o consumidor entre o time.After disparar e ele sair da fila.
-// Se PTimeout tratasse isso errado, apareceria item perdido ou consumidor
-// preso no fim.
+// Timeout de 1 microssegundo: força a corrida entre o time.After e o V().
+// Tratado errado, apareceria item perdido ou consumidor preso.
 func TestTimeoutAgressivo(t *testing.T) {
 	for _, v := range []string{"channel", "semaforo"} {
 		for _, k := range []int{1, 4} {

@@ -5,9 +5,8 @@ import (
 	"time"
 )
 
-// Sem tempo de pensar e com pausa entre os garfos, a base trava sempre: todos
-// pegam o esquerdo durante a pausa. O detector tem que perceber e o programa
-// tem que terminar com todos os garfos devolvidos (executar confere isso).
+// Sem pensar e com pausa entre os garfos, a base trava sempre. O detector tem
+// que perceber e o programa tem que sair com todos os garfos devolvidos.
 func TestBaseTrava(t *testing.T) {
 	for _, n := range []int{2, 5, 10} {
 		cfg := Config{N: n, R: 50, Pausa: 2 * time.Millisecond, Seed: 1, Timeout: 10 * time.Second}
@@ -39,9 +38,8 @@ func TestEstrategiasNaoTravam(t *testing.T) {
 	}
 }
 
-// Sem nenhum tempo de trabalho: contenção máxima. Garante exclusão mútua
-// contando quantos vizinhos comem ao mesmo tempo seria invasivo; aqui o
-// teste é que tudo termina, e o -race cobre o acesso aos garfos.
+// Sem tempo de trabalho: contenção máxima. O teste é que tudo termina, e o
+// -race cobre o acesso aos garfos.
 func TestPoolSemTrabalho(t *testing.T) {
 	for _, e := range []string{"hierarquia", "limite", "garcom"} {
 		cfg := Config{N: 5, R: 500, Pool: true, Seed: 1, Timeout: 20 * time.Second}

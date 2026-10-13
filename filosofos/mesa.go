@@ -7,9 +7,8 @@ import (
 	"time"
 )
 
-// Garfo é um channel com capacidade 1. O garfo está livre quando o channel
-// contém o token; pegar = receber o token, devolver = enviar o token de volta.
-// Como só existe um token por garfo, a exclusão mútua vem do próprio channel.
+// Garfo é um channel de capacidade 1 com um token: pegar é receber, devolver
+// é enviar. Token único, então a exclusão mútua sai do próprio channel.
 type Garfo chan struct{}
 
 func novoGarfo() Garfo {
@@ -18,16 +17,8 @@ func novoGarfo() Garfo {
 	return g
 }
 
-// Mesa guarda os garfos e o detector de deadlock, que é comum a todas as
-// estratégias.
-//
-// Detector: esperandoSegundo conta quantos filósofos seguram exatamente um
-// garfo e estão esperando o segundo. Se esse número chega a N, os N garfos
-// estão todos na mão de alguém, ninguém tem dois, e portanto ninguém vai
-// devolver nada: é deadlock com certeza (espera circular fechada), não uma
-// suspeita por timeout. O contador nunca passa de N por engano: um filósofo
-// que já pegou o segundo garfo mas ainda não decrementou seguraria 2 garfos,
-// e N filósofos contados exigiriam N+1 garfos.
+// Mesa guarda os garfos e o detector de deadlock, comum às quatro estratégias.
+// Detector: esperandoSegundo == N significa deadlock certo, não suspeita.
 type Mesa struct {
 	n      int
 	garfos []Garfo
@@ -65,9 +56,8 @@ func dormir(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-// pegarEmOrdem pega o garfo `primeiro` e depois o `segundo`, segurando o
-// primeiro enquanto espera o segundo (hold-and-wait). Se o contexto for
-// cancelado no meio, devolve o que já pegou e retorna false sem segurar nada.
+// pegarEmOrdem pega `primeiro` e depois `segundo`, com hold-and-wait de
+// propósito. Cancelado no meio, devolve o que pegou e sai sem segurar nada.
 func (m *Mesa) pegarEmOrdem(ctx context.Context, primeiro, segundo int) bool {
 	select {
 	case <-m.garfos[primeiro]:
@@ -92,8 +82,7 @@ func (m *Mesa) pegarEmOrdem(ctx context.Context, primeiro, segundo int) bool {
 	}
 }
 
-// devolver nunca bloqueia: o channel tem capacidade 1 e está vazio, porque o
-// token está com quem devolve.
+// devolver nunca bloqueia: o channel tem capacidade 1 e está vazio.
 func (m *Mesa) devolver(a, b int) {
 	m.garfos[a] <- struct{}{}
 	m.garfos[b] <- struct{}{}
@@ -102,16 +91,14 @@ func (m *Mesa) devolver(a, b int) {
 // Estrategia define como o filósofo i adquire e libera os dois garfos.
 type Estrategia interface {
 	Nome() string
-	// Adquirir bloqueia até o filósofo i ter os dois garfos. Retorna false
-	// se o contexto foi cancelado; nesse caso não segura nenhum recurso.
+	// Adquirir bloqueia até o filósofo i ter os dois garfos. false = contexto
+	// cancelado, e nesse caso não segura nenhum recurso.
 	Adquirir(ctx context.Context, i int) bool
 	Liberar(i int)
-	// Parar encerra goroutines auxiliares (garçom). Chamado depois que
-	// todos os filósofos terminaram.
+	// Parar encerra goroutines auxiliares (garçom), depois que todos saíram.
 	Parar()
 }
 
-// ---------------------------------------------------------------------------
 // Base: todos pegam o esquerdo e depois o direito. Sujeita a deadlock.
 
 type Base struct{ m *Mesa }
@@ -123,10 +110,8 @@ func (b *Base) Adquirir(ctx context.Context, i int) bool {
 func (b *Base) Liberar(i int) { b.m.devolver(b.m.esquerdo(i), b.m.direito(i)) }
 func (b *Base) Parar()        {}
 
-// ---------------------------------------------------------------------------
-// Hierarquia de recursos: cada filósofo pega primeiro o garfo de menor
-// índice. Na prática só o filósofo N-1 inverte a ordem (pega o garfo 0
-// antes do N-1), o que quebra a simetria e a espera circular.
+// Hierarquia: todos pegam primeiro o garfo de menor índice. Só o filósofo N-1
+// inverte, e essa assimetria basta para impedir a espera circular.
 
 type Hierarquia struct{ m *Mesa }
 
@@ -141,11 +126,8 @@ func (h *Hierarquia) Adquirir(ctx context.Context, i int) bool {
 func (h *Hierarquia) Liberar(i int) { h.m.devolver(h.m.esquerdo(i), h.m.direito(i)) }
 func (h *Hierarquia) Parar()        {}
 
-// ---------------------------------------------------------------------------
-// Limite de lugares: no máximo N-1 filósofos à mesa ao mesmo tempo. O
-// "porteiro" é um semáforo de contagem implementado como channel com
-// capacidade N-1 (enviar = ocupar lugar, receber = liberar). Dentro da mesa
-// a ordem é a mesma da base (esquerdo, depois direito).
+// Limite: no máximo N-1 à mesa, via channel de capacidade N-1 como semáforo
+// contador. Mata a espera circular; a hold-and-wait continua lá dentro.
 
 type Limite struct {
 	m       *Mesa
@@ -175,16 +157,8 @@ func (l *Limite) Liberar(i int) {
 }
 func (l *Limite) Parar() {}
 
-// ---------------------------------------------------------------------------
-// Garçom: uma goroutine central é dona do estado dos garfos e concede os
-// dois de uma vez. O filósofo só toca nos channels dos garfos depois da
-// concessão, então nunca segura um garfo esperando o outro.
-//
-// Política de atendimento: fila de pedidos em ordem de chegada. O garçom
-// percorre a fila; um pedido é atendido se os dois garfos estão livres e
-// nenhum pedido mais antigo ainda não atendido está esperando por eles
-// (reserva). A reserva impede que vizinhos "furem a fila" indefinidamente,
-// que é o que causaria starvation numa política gulosa.
+// Garçom: goroutine central concede os dois garfos de uma vez, o que quebra a
+// hold-and-wait. Fila FIFO com reserva, que é o que evita starvation.
 
 type pedido struct {
 	id       int
@@ -265,13 +239,12 @@ func (g *Garcom) Adquirir(ctx context.Context, i int) bool {
 	case <-ctx.Done():
 		return false
 	}
-	// Concedido: os dois garfos estão livres, a ordem não importa e as
-	// recepções não bloqueiam de fato.
+	// Concedido: os dois garfos estão livres, então nada bloqueia aqui.
 	return g.m.pegarEmOrdem(ctx, g.m.esquerdo(i), g.m.direito(i))
 }
 
-// Liberar devolve os tokens aos channels ANTES de avisar o garçom, para que
-// o próximo filósofo autorizado encontre os garfos já disponíveis.
+// Liberar devolve os tokens ANTES de avisar o garçom, para o próximo
+// autorizado já achar os garfos na mesa.
 func (g *Garcom) Liberar(i int) {
 	g.m.devolver(g.m.esquerdo(i), g.m.direito(i))
 	g.devolucoes <- i
@@ -282,8 +255,8 @@ func (g *Garcom) Parar() {
 	<-g.terminou
 }
 
-// GarcomReserva liga a reserva FIFO do garçom (padrão). Configurada pela
-// flag -garcom-reserva; existe para medir o custo da garantia anti-starvation.
+// GarcomReserva liga a reserva FIFO (padrão). Flag -garcom-reserva; existe
+// para medir o custo da garantia anti-starvation.
 var GarcomReserva = true
 
 func novaEstrategia(nome string, m *Mesa) Estrategia {

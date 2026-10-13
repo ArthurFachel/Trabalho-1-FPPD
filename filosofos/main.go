@@ -1,10 +1,5 @@
 // Jantar dos Filósofos com channels como garfos.
-//
-// Uso:
-//
-//	go run ./filosofos -n 5 -r 100 -estrategia todas
-//
-// Veja README.md para todas as flags.
+// Ex.: go run ./filosofos -n 5 -r 100 -estrategia todas. Flags no README.
 package main
 
 import (
@@ -48,9 +43,8 @@ type Resultado struct {
 	Por        []Stats
 }
 
-// filosofo executa o ciclo pensar -> pegar garfos -> comer -> devolver.
-// Cada filósofo escreve só no próprio Stats; a leitura acontece depois do
-// wg.Wait(), que estabelece a relação happens-before. Sem mutex e sem race.
+// filosofo roda o ciclo pensar, pegar garfos, comer, devolver. Sem mutex: cada
+// um escreve só no próprio Stats, lido só depois do wg.Wait().
 func filosofo(ctx context.Context, i int, cfg Config, e Estrategia, orcamento *atomic.Int64, st *Stats) {
 	rng := rand.New(rand.NewPCG(cfg.Seed, uint64(i)))
 	for it := 0; ; it++ {
@@ -103,9 +97,8 @@ func executar(nome string, cfg Config) Resultado {
 		}(i)
 	}
 
-	// Quando o detector dispara, cancela o contexto: os filósofos presos no
-	// segundo garfo devolvem o primeiro e saem. Esse é o "desfazer" do
-	// deadlock pra o programa poder terminar de forma ordenada.
+	// Detector disparou: cancela o contexto para quem está preso no segundo
+	// garfo devolver o primeiro e o programa ainda encerrar ordenado.
 	terminou := make(chan struct{})
 	go func() { wg.Wait(); close(terminou) }()
 
@@ -133,8 +126,8 @@ func executar(nome string, cfg Config) Resultado {
 	return res
 }
 
-// jain calcula o índice de fairness de Jain: (sum x)^2 / (n * sum x^2).
-// Vale 1 quando todos recebem igual e 1/n quando um só recebe tudo.
+// jain: (soma x)^2 / (n * soma x^2). Vale 1 se todos recebem igual, 1/n se um
+// só leva tudo.
 func jain(xs []float64) float64 {
 	var s, s2 float64
 	for _, x := range xs {
@@ -290,9 +283,8 @@ func main() {
 	}
 	fmt.Println()
 
-	// Encerramento ordenado: nenhuma goroutine criada pelas execuções deve
-	// sobrar. Dá um respiro curto pro runtime recolher goroutines que já
-	// retornaram (a que fecha `terminou`, por exemplo).
+	// Nenhuma goroutine criada pode sobrar. O respiro é para o runtime
+	// recolher as que já retornaram.
 	sobra := 0
 	for t := 0; t < 50; t++ {
 		sobra = runtime.NumGoroutine() - gorAntes

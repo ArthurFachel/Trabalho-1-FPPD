@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Resume os CSVs de resultados/ em tabelas (média ± desvio entre repetições).
-
-Só usa a biblioteca padrão. Saída: resultados/resumo.txt e, para o
-relatório, relatorio/tabelas.tex.
+Só stdlib. Escreve resultados/resumo.txt e relatorio/tabelas_bruto.tex.
 """
 import csv
 import statistics as st

@@ -1,11 +1,5 @@
-// Produtor/Consumidor com buffer limitado: versão com channel e versão com
-// semáforos.
-//
-// Uso:
-//
-//	go run ./produtor-consumidor -p 4 -c 4 -k 10 -m 500 -versao todas
-//
-// Veja README.md para todas as flags.
+// Produtor/Consumidor com buffer limitado, nas versões channel e semáforos.
+// Ex.: go run ./produtor-consumidor -p 4 -c 4 -k 10 -m 500. Flags no README.
 package main
 
 import (
@@ -90,11 +84,8 @@ func consumidor(id int, cfg Config, b Buffer, st *StatsConsumidor) {
 	}
 }
 
-// consumidorComTimeout: se nada chega em cfg.Timeout, executa um
-// comportamento alternativo (aqui: registra a ociosidade e faz uma tarefa de
-// manutenção, que é compactar a própria lista de vistos) e volta a tentar.
-// Nunca abandona o buffer por timeout: só sai quando o buffer diz que
-// acabou, para não deixar itens sem consumidor.
+// consumidorComTimeout faz uma tarefa alternativa quando nada chega no prazo.
+// Nunca sai por timeout, só quando o buffer avisa que acabou.
 func consumidorComTimeout(id int, cfg Config, b Buffer, st *StatsConsumidor, verboso bool) {
 	rng := rand.New(rand.NewPCG(cfg.Seed, uint64(2000+id)))
 	for {
@@ -179,10 +170,8 @@ func executar(versao string, cfg Config, verboso bool) Resultado {
 		}(i)
 	}
 
-	// Encerramento ordenado em três passos:
-	// 1) espera todos os produtores terminarem;
-	// 2) sinaliza o fim no buffer (close ou pílulas de veneno);
-	// 3) espera os consumidores drenarem o que sobrou e saírem.
+	// Encerramento em três passos: espera os produtores, sinaliza o fim no
+	// buffer, espera os consumidores drenarem.
 	wgProd.Wait()
 	b.Fechar(cfg.C)
 	wgCons.Wait()
@@ -198,8 +187,8 @@ func executar(versao string, cfg Config, verboso bool) Resultado {
 	return res
 }
 
-// verificar confere que cada item (produtor, seq) foi consumido exatamente
-// uma vez. Total igual não basta: um item perdido e um duplicado se cancelam.
+// verificar confere que cada (produtor, seq) foi consumido exatamente uma vez.
+// Só os totais não bastam: um perdido e um duplicado se cancelariam.
 func verificar(r *Resultado) {
 	vistos := make([][]int, r.Cfg.P)
 	for p := range vistos {
