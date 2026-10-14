@@ -6,29 +6,32 @@ import (
 	"time"
 )
 
-// Item carrega a identidade de quem produziu, para a verificação final de que
-// cada item foi consumido exatamente uma vez.
+// Item guarda quem produziu e o número, pra conferir no fim que cada um foi
+// consumido uma vez só.
 type Item struct {
 	Produtor int
 	Seq      int
 	fim      bool // pílula de veneno (só na versão com semáforos)
 }
 
-// Buffer é o contrato comum das duas versões.
+// Buffer é o que as duas versões têm em comum.
 type Buffer interface {
 	Put(Item)
-	// Get bloqueia até haver item. ok=false significa que acabou de vez.
+	// Get espera até ter item. ok=false = acabou, não vem mais nada.
 	Get() (it Item, ok bool)
-	// GetTimeout é o Get com prazo d. timeout=true: nada chegou, nada saiu.
+	// GetTimeout é o Get com prazo. timeout=true = nada chegou a tempo e
+	// nada foi tirado do buffer.
 	GetTimeout(d time.Duration) (it Item, ok bool, timeout bool)
-	// Fechar é chamado uma vez, depois que todos os produtores terminaram.
+	// Fechar é chamado uma vez só, depois que os produtores terminaram.
 	Fechar(consumidores int)
 	Ocupacao() int
 	Nome() string
 }
 
-// Versão 1: channel de capacidade K, bloqueio pela semântica do canal.
-// Encerramento por close(ch): o receive drena o que sobrou antes do ok=false.
+// ---------------------------------------------------------------------------
+// Versão 1: channel de capacidade K; cheio ou vazio, quem segura é o próprio
+// channel. Pra encerrar, close(ch): o receive ainda entrega o que sobrou e só
+// devolve ok=false com o channel fechado E vazio. Nada se perde.
 
 type BufferChannel struct{ ch chan Item }
 
@@ -51,8 +54,17 @@ func (b *BufferChannel) GetTimeout(d time.Duration) (Item, bool, bool) {
 func (b *BufferChannel) Fechar(int)    { close(b.ch) }
 func (b *BufferChannel) Ocupacao() int { return len(b.ch) }
 
-// Semáforo contador: contador mais fila FIFO, como na definição da aula, não o
-// atalho com channel. V() passa direto ao primeiro da fila, daí o PTimeout.
+// ---------------------------------------------------------------------------
+// Semáforo de contagem com fila por ordem de chegada, feito em cima de um
+// mutex.
+//
+//	P(): se cont > 0, cont--. Senão entra no fim da fila e dorme.
+//	V(): se tem alguém na fila, entrega a permissão direto pro primeiro
+//	     (cont não muda). Senão cont++.
+//
+// Entregar direto impede que um recém-chegado fure a fila. Cada um que
+// espera dorme no próprio channel, e é isso que deixa o PTimeout usar
+// select com time.After.
 
 type Semaforo struct {
 	mu   sync.Mutex
@@ -75,7 +87,7 @@ func (s *Semaforo) P() {
 	<-c
 }
 
-// PTimeout tenta P() por no máximo d. Retorna true se obteve a permissão.
+// PTimeout tenta o P() por no máximo d; true = conseguiu a permissão.
 func (s *Semaforo) PTimeout(d time.Duration) bool {
 	s.mu.Lock()
 	if s.cont > 0 {
@@ -92,8 +104,9 @@ func (s *Semaforo) PTimeout(d time.Duration) bool {
 		return true
 	case <-time.After(d):
 	}
-	// Estourou o prazo, mas um V() pode ter nos escolhido entre o disparo e
-	// este Lock. Ainda na fila: saímos. Já fora: a permissão é nossa.
+	// Estourou o prazo, mas um V() pode ter escolhido a gente entre o
+	// time.After e este Lock. Se ainda estamos na fila, é só sair. Se já
+	// saímos, a permissão é nossa e não dá pra jogar fora (item perdido).
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i, w := range s.fila {
@@ -119,8 +132,26 @@ func (s *Semaforo) V() {
 	s.mu.Unlock()
 }
 
-// Versão 2: buffer circular explícito, algoritmo clássico (Ben-Ari 6.8).
-// mutexProd protege `in`, mutexCons protege `out`. Fim por pílula de veneno.
+// ---------------------------------------------------------------------------
+// Versão 2: buffer circular na mão, o algoritmo clássico.
+//
+//	Produtor:                    Consumidor:
+//	  P(notFull)                   P(notEmpty)
+//	  lock(mutexProd)              lock(mutexCons)
+//	    buf[in] = item               item = buf[out]
+//	    in = (in+1) % K              out = (out+1) % K
+//	  unlock(mutexProd)            unlock(mutexCons)
+//	  V(notEmpty)                  V(notFull)
+//
+// notFull começa em K e notEmpty em 0; os semáforos só contam vagas e itens.
+// Quem protege as posições são os mutexes: mutexProd cuida do `in`,
+// mutexCons do `out`. Produtor e consumidor nunca mexem na mesma posição,
+// porque um só escreve onde o V(notFull) liberou e o outro só lê o que o
+// V(notEmpty) publicou.
+//
+// Pra encerrar, o Fechar põe uma pílula de veneno por consumidor, pelo mesmo
+// Put. Como a fila é por ordem de chegada, cada consumidor só vê a pílula
+// depois que os itens reais já saíram, e aí ele sai.
 
 type BufferSemaforo struct {
 	buf       []Item
@@ -129,7 +160,7 @@ type BufferSemaforo struct {
 	mutexCons sync.Mutex
 	notFull   *Semaforo
 	notEmpty  *Semaforo
-	ocupacao  atomic.Int64 // só para métrica; não participa da sincronização
+	ocupacao  atomic.Int64 // só pra medir; não faz parte da sincronização
 }
 
 func novoBufferSemaforo(k int) *BufferSemaforo {

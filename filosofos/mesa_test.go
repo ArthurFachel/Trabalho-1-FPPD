@@ -5,8 +5,9 @@ import (
 	"time"
 )
 
-// Sem pensar e com pausa entre os garfos, a base trava sempre. O detector tem
-// que perceber e o programa tem que sair com todos os garfos devolvidos.
+// Sem pensar e com pausa entre os garfos, a base sempre trava: todos pegam o
+// da esquerda durante a pausa. O detector tem que ver isso e o programa tem
+// que terminar com os garfos devolvidos.
 func TestBaseTrava(t *testing.T) {
 	for _, n := range []int{2, 5, 10} {
 		cfg := Config{N: n, R: 50, Pausa: 2 * time.Millisecond, Seed: 1, Timeout: 10 * time.Second}
@@ -17,8 +18,7 @@ func TestBaseTrava(t *testing.T) {
 	}
 }
 
-// Mesmo cenário adversarial: as três estratégias não podem travar e cada
-// filósofo tem que completar as R refeições.
+// Mesmo cenário: as outras três não podem travar e cada um come R vezes.
 func TestEstrategiasNaoTravam(t *testing.T) {
 	for _, e := range []string{"hierarquia", "limite", "garcom"} {
 		for _, n := range []int{2, 3, 5, 10} {
@@ -38,8 +38,8 @@ func TestEstrategiasNaoTravam(t *testing.T) {
 	}
 }
 
-// Sem tempo de trabalho: contenção máxima. O teste é que tudo termina, e o
-// -race cobre o acesso aos garfos.
+// Sem tempo de trabalho: disputa máxima. O teste é só que tudo termina; o
+// -race cuida do acesso aos garfos.
 func TestPoolSemTrabalho(t *testing.T) {
 	for _, e := range []string{"hierarquia", "limite", "garcom"} {
 		cfg := Config{N: 5, R: 500, Pool: true, Seed: 1, Timeout: 20 * time.Second}

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""Resume os CSVs de resultados/ em tabelas (média ± desvio entre repetições).
-Só stdlib. Escreve resultados/resumo.txt e relatorio/tabelas_bruto.tex.
+"""Junta os CSVs de resultados/ em tabelas (média +- desvio entre repetições).
+
+Usa só a biblioteca padrão. Gera resultados/resumo.txt e, pro relatório,
+relatorio/tabelas_bruto.tex.
 """
 import csv
 import statistics as st
@@ -28,7 +30,7 @@ def fmt(m, d, casas=2):
 
 def filosofos(nome):
     rows = list(csv.DictReader(open(RES / nome)))
-    # agrupa por (estrategia, rep)
+    # junta as linhas de cada (estrategia, rep)
     runs = defaultdict(list)
     for r in rows:
         runs[(r["estrategia"], int(r["rep"]))].append(r)

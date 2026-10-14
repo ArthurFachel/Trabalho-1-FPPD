@@ -1,5 +1,11 @@
-// Produtor/Consumidor com buffer limitado, nas versões channel e semáforos.
-// Ex.: go run ./produtor-consumidor -p 4 -c 4 -k 10 -m 500. Flags no README.
+// Produtor/Consumidor com buffer de tamanho fixo: uma versão com channel,
+// outra com semáforos.
+//
+// Uso:
+//
+//	go run ./produtor-consumidor -p 4 -c 4 -k 10 -m 500 -versao todas
+//
+// Veja README.md para todas as flags.
 package main
 
 import (
@@ -17,24 +23,24 @@ import (
 
 type Config struct {
 	P, C, K, M int
-	Produzir   time.Duration // média (exponencial) do tempo de produzir um item
-	Consumir   time.Duration // média (exponencial) do tempo de consumir um item
+	Produzir   time.Duration // tempo médio (exponencial) pra produzir um item
+	Consumir   time.Duration // tempo médio (exponencial) pra consumir um item
 	Timeout    time.Duration // prazo do consumidor 0 (select + time.After)
-	Amostragem time.Duration // período de amostragem da ocupação
+	Amostragem time.Duration // de quanto em quanto tempo mede a ocupação
 	Seed       uint64
 }
 
 type StatsConsumidor struct {
 	Itens       int
-	Espera      time.Duration // tempo bloqueado esperando item
+	Espera      time.Duration // tempo parado esperando item
 	Timeouts    int           // só o consumidor 0
-	Alternativo int           // vezes que executou o comportamento alternativo
+	Alternativo int           // quantas vezes rodou o comportamento alternativo
 	vistos      []Item
 }
 
 type StatsProdutor struct {
 	Itens    int
-	Bloqueio time.Duration // tempo bloqueado no Put (buffer cheio)
+	Bloqueio time.Duration // tempo parado no Put (buffer cheio)
 }
 
 type Resultado struct {
@@ -68,7 +74,7 @@ func produtor(id int, cfg Config, b Buffer, st *StatsProdutor) {
 	}
 }
 
-// consumidor comum: bloqueia em Get até chegar item ou o buffer acabar.
+// consumidor normal: para no Get até chegar item ou o buffer acabar.
 func consumidor(id int, cfg Config, b Buffer, st *StatsConsumidor) {
 	rng := rand.New(rand.NewPCG(cfg.Seed, uint64(2000+id)))
 	for {
@@ -84,8 +90,9 @@ func consumidor(id int, cfg Config, b Buffer, st *StatsConsumidor) {
 	}
 }
 
-// consumidorComTimeout faz uma tarefa alternativa quando nada chega no prazo.
-// Nunca sai por timeout, só quando o buffer avisa que acabou.
+// consumidorComTimeout: se nada chega em cfg.Timeout, faz outra coisa e
+// tenta de novo. Nunca desiste do buffer por causa do prazo; só sai quando o
+// buffer diz que acabou, pra não deixar item sem consumidor.
 func consumidorComTimeout(id int, cfg Config, b Buffer, st *StatsConsumidor, verboso bool) {
 	rng := rand.New(rand.NewPCG(cfg.Seed, uint64(2000+id)))
 	for {
@@ -111,7 +118,7 @@ func consumidorComTimeout(id int, cfg Config, b Buffer, st *StatsConsumidor, ver
 
 func comportamentoAlternativo(st *StatsConsumidor) {
 	st.Alternativo++
-	st.vistos = st.vistos[:len(st.vistos):len(st.vistos)] // libera capacidade ociosa
+	st.vistos = st.vistos[:len(st.vistos):len(st.vistos)] // libera a capacidade sobrando
 }
 
 func novoBuffer(versao string, k int) Buffer {
@@ -129,8 +136,8 @@ func executar(versao string, cfg Config, verboso bool) Resultado {
 	res := Resultado{Versao: versao, Cfg: cfg,
 		Prod: make([]StatsProdutor, cfg.P), Cons: make([]StatsConsumidor, cfg.C)}
 
-	// Amostrador de ocupação: lê o tamanho do buffer em intervalos fixos.
-	// Média de amostras igualmente espaçadas no tempo = ocupação média no tempo.
+	// Amostrador: lê o tamanho do buffer em intervalos iguais, então a média
+	// das medidas é a ocupação média.
 	pararAmostra := make(chan struct{})
 	amostraFeita := make(chan struct{})
 	var somaOcup, nAmostras int
@@ -170,8 +177,8 @@ func executar(versao string, cfg Config, verboso bool) Resultado {
 		}(i)
 	}
 
-	// Encerramento em três passos: espera os produtores, sinaliza o fim no
-	// buffer, espera os consumidores drenarem.
+	// Encerramento: espera os produtores, avisa o fim no buffer (close ou
+	// pílulas) e espera os consumidores esvaziarem tudo e saírem.
 	wgProd.Wait()
 	b.Fechar(cfg.C)
 	wgCons.Wait()
@@ -187,8 +194,8 @@ func executar(versao string, cfg Config, verboso bool) Resultado {
 	return res
 }
 
-// verificar confere que cada (produtor, seq) foi consumido exatamente uma vez.
-// Só os totais não bastam: um perdido e um duplicado se cancelariam.
+// verificar confere que cada item foi consumido uma vez só. Olhar o total
+// não basta: um perdido e um duplicado se anulam.
 func verificar(r *Resultado) {
 	vistos := make([][]int, r.Cfg.P)
 	for p := range vistos {

@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-// executarComPrazo falha o teste em vez de travar até o timeout do go test.
-// Consumidor preso (permissão perdida, pílula faltando) aparece como "travou".
+// executarComPrazo faz o teste falhar em vez de ficar preso até o limite de
+// 10 min do go test. Consumidor travado aparece aqui como "travou".
 func executarComPrazo(t *testing.T, v string, cfg Config) Resultado {
 	t.Helper()
 	ch := make(chan Resultado, 1)
@@ -21,7 +21,7 @@ func executarComPrazo(t *testing.T, v string, cfg Config) Resultado {
 	return Resultado{}
 }
 
-// Estresse sem trabalho simulado: máxima contenção nos semáforos e mutexes.
+// Sem tempo de trabalho: disputa máxima nos semáforos e mutexes.
 func TestSemContencao(t *testing.T) {
 	for _, v := range []string{"channel", "semaforo"} {
 		for _, k := range []int{1, 2, 7, 100} {
@@ -38,8 +38,9 @@ func TestSemContencao(t *testing.T) {
 	}
 }
 
-// Timeout de 1 microssegundo: força a corrida entre o time.After e o V().
-// Tratado errado, apareceria item perdido ou consumidor preso.
+// Prazo de 1 microssegundo: o consumidor 0 estoura o tempo todo com itens
+// chegando. É o caso em que um V() escolhe ele bem na hora do time.After.
+// Se o PTimeout errasse aqui, daria item perdido ou consumidor travado.
 func TestTimeoutAgressivo(t *testing.T) {
 	for _, v := range []string{"channel", "semaforo"} {
 		for _, k := range []int{1, 4} {
@@ -56,8 +57,8 @@ func TestTimeoutAgressivo(t *testing.T) {
 	}
 }
 
-// Consumidor só com timeout e produtores lentos: o comportamento
-// alternativo tem que disparar, e mesmo assim nada se perde.
+// Um consumidor com prazo e produtor lento: o comportamento alternativo tem
+// que acontecer e mesmo assim nada pode se perder.
 func TestComportamentoAlternativo(t *testing.T) {
 	for _, v := range []string{"channel", "semaforo"} {
 		cfg := Config{P: 1, C: 1, K: 5, M: 20, Produzir: 4 * time.Millisecond,
@@ -69,8 +70,8 @@ func TestComportamentoAlternativo(t *testing.T) {
 	}
 }
 
-// Semáforo isolado: PTimeout concorrente com V. Toda permissão emitida por V
-// tem que ser obtida por exatamente um P/PTimeout bem-sucedido.
+// Semáforo sozinho: toda permissão solta por V tem que ser pega por
+// exatamente um P/PTimeout.
 func TestSemaforoConservaPermissoes(t *testing.T) {
 	s := novoSemaforo(0)
 	const total = 20000

@@ -1,5 +1,10 @@
-// Jantar dos Filósofos com channels como garfos.
-// Ex.: go run ./filosofos -n 5 -r 100 -estrategia todas. Flags no README.
+// Jantar dos Filósofos, usando channels como garfos.
+//
+// Uso:
+//
+//	go run ./filosofos -n 5 -r 100 -estrategia todas
+//
+// Veja README.md para todas as flags.
 package main
 
 import (
@@ -20,7 +25,7 @@ import (
 
 type Config struct {
 	N, R    int
-	Pool    bool // R*N refeições compartilhadas em vez de R por filósofo
+	Pool    bool // N*R refeições no total, disputadas, em vez de R pra cada um
 	Pensar  time.Duration
 	Comer   time.Duration
 	Pausa   time.Duration
@@ -43,13 +48,13 @@ type Resultado struct {
 	Por        []Stats
 }
 
-// filosofo roda o ciclo pensar, pegar garfos, comer, devolver. Sem mutex: cada
-// um escreve só no próprio Stats, lido só depois do wg.Wait().
+// filosofo roda o ciclo pensar -> pegar garfos -> comer -> devolver. Cada um
+// só escreve no próprio Stats, lido depois do wg.Wait(): sem mutex, sem race.
 func filosofo(ctx context.Context, i int, cfg Config, e Estrategia, orcamento *atomic.Int64, st *Stats) {
 	rng := rand.New(rand.NewPCG(cfg.Seed, uint64(i)))
 	for it := 0; ; it++ {
 		if cfg.Pool {
-			// Reserva uma refeição do orçamento global antes de tentar.
+			// Pega uma refeição do total global antes de tentar.
 			if orcamento.Add(-1) < 0 {
 				return
 			}
@@ -70,7 +75,7 @@ func filosofo(ctx context.Context, i int, cfg Config, e Estrategia, orcamento *a
 		}
 		st.Refeicoes++
 		if cfg.Comer > 0 {
-			time.Sleep(cfg.Comer) // come sem ser interrompido; tempo finito
+			time.Sleep(cfg.Comer) // come sem interrupção; é um tempo finito
 		}
 		e.Liberar(i)
 	}
@@ -97,8 +102,8 @@ func executar(nome string, cfg Config) Resultado {
 		}(i)
 	}
 
-	// Detector disparou: cancela o contexto para quem está preso no segundo
-	// garfo devolver o primeiro e o programa ainda encerrar ordenado.
+	// Se o detector disparar, cancela o contexto: quem espera o segundo
+	// garfo devolve o primeiro e sai, e o programa termina direito.
 	terminou := make(chan struct{})
 	go func() { wg.Wait(); close(terminou) }()
 
@@ -116,7 +121,7 @@ func executar(nome string, cfg Config) Resultado {
 	res.Duracao = time.Since(inicio)
 	e.Parar()
 
-	// Sanidade: todo garfo deve ter voltado pra mesa.
+	// Conferência: todo garfo tem que ter voltado pra mesa.
 	for i, g := range m.garfos {
 		if len(g) != 1 {
 			fmt.Fprintf(os.Stderr, "ERRO: garfo %d não foi devolvido\n", i)
@@ -126,8 +131,8 @@ func executar(nome string, cfg Config) Resultado {
 	return res
 }
 
-// jain: (soma x)^2 / (n * soma x^2). Vale 1 se todos recebem igual, 1/n se um
-// só leva tudo.
+// jain: índice de justiça, (soma x)^2 / (n * soma x^2). Dá 1 quando todos
+// recebem igual e 1/n quando um só leva tudo.
 func jain(xs []float64) float64 {
 	var s, s2 float64
 	for _, x := range xs {
@@ -251,7 +256,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "estrategia desconhecida: %s\n", n)
 			os.Exit(1)
 		}
-		e.Parar() // o garçom sobe uma goroutine; para antes de medir a linha de base
+		e.Parar() // o garçom sobe uma goroutine; fecha antes de contar as goroutines
 	}
 
 	gorAntes := runtime.NumGoroutine()
@@ -283,8 +288,8 @@ func main() {
 	}
 	fmt.Println()
 
-	// Nenhuma goroutine criada pode sobrar. O respiro é para o runtime
-	// recolher as que já retornaram.
+	// Nenhuma goroutine pode sobrar. Espera um pouco porque o runtime demora
+	// um instante pra recolher as que já retornaram.
 	sobra := 0
 	for t := 0; t < 50; t++ {
 		sobra = runtime.NumGoroutine() - gorAntes
