@@ -1,4 +1,4 @@
-# T1 — Problemas Clássicos de Concorrência (FPPD 98713-04)
+# T1:  Problemas Clássicos de Concorrência (FPPD 98713-04)
 
 Arthur Domingues Fachel Nunes
 
